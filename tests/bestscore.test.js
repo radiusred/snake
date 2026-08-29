@@ -36,6 +36,16 @@ test('loadBest treats garbage, empty, and negative values as 0 (never NaN)', () 
   assert.strictEqual(best.loadBest(makeStorage({ [best.KEY]: '-5' })), 0);
 });
 
+test('loadBest rejects a numeric prefix followed by garbage (whole-string check)', () => {
+  // parseInt would happily read '42garbage' as 42; a corrupted store must not
+  // restore a partial value. Only a pure run of digits is a trusted best.
+  assert.strictEqual(best.loadBest(makeStorage({ [best.KEY]: '42garbage' })), 0);
+  assert.strictEqual(best.loadBest(makeStorage({ [best.KEY]: '7 ' })), 0, 'trailing space');
+  assert.strictEqual(best.loadBest(makeStorage({ [best.KEY]: ' 7' })), 0, 'leading space');
+  assert.strictEqual(best.loadBest(makeStorage({ [best.KEY]: '3.9' })), 0, 'decimal');
+  assert.strictEqual(best.loadBest(makeStorage({ [best.KEY]: '0x10' })), 0, 'hex prefix');
+});
+
 test('loadBest tolerates a throwing store and returns 0', () => {
   assert.strictEqual(best.loadBest(throwingStorage), 0);
 });
