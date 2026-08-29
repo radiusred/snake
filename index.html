@@ -42,6 +42,9 @@
       border-radius: 8px;
       display: block;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+      /* M2-R3: let the swipe handlers own board gestures instead of the
+         browser scrolling/zooming the page under the player's finger. */
+      touch-action: none;
     }
     .overlay {
       position: absolute;
@@ -87,7 +90,7 @@
       <p class="hint">or press Space / Enter</p>
     </div>
   </div>
-  <p class="hint">Arrow keys or WASD to move</p>
+  <p class="hint">Arrow keys or WASD to move — or swipe on a touchscreen</p>
 
   <script src="game.js"></script>
   <script src="bestscore.js"></script>
@@ -228,6 +231,40 @@
           SnakeGame.setDirection(state, dir);
         }
       });
+
+      // M2-R3: touch/swipe controls, so the game is playable on a touchscreen
+      // with no keyboard. A swipe on the board steers the snake; keyboard and
+      // touch both feed the same SnakeGame.setDirection buffer, so they can
+      // never disagree, and a 180-degree swipe is rejected there for free.
+      var SWIPE_MIN_PX = 24; // shorter drags are taps/jitter, not swipes.
+      var touchStart = null;
+
+      canvas.addEventListener('touchstart', function (e) {
+        var t = e.changedTouches && e.changedTouches[0];
+        if (!t) return;
+        touchStart = { x: t.clientX, y: t.clientY };
+        e.preventDefault(); // keep the board drag from scrolling the page.
+      }, { passive: false });
+
+      canvas.addEventListener('touchmove', function (e) {
+        if (touchStart) e.preventDefault(); // hold the page still while steering.
+      }, { passive: false });
+
+      canvas.addEventListener('touchend', function (e) {
+        if (!touchStart) return;
+        var t = e.changedTouches && e.changedTouches[0];
+        if (!t) { touchStart = null; return; }
+        var dx = t.clientX - touchStart.x;
+        var dy = t.clientY - touchStart.y;
+        touchStart = null;
+        var absX = Math.abs(dx);
+        var absY = Math.abs(dy);
+        if (absX < SWIPE_MIN_PX && absY < SWIPE_MIN_PX) return; // a tap, not a swipe.
+        // The axis with the larger travel wins; ties fall to vertical.
+        var dir = absX > absY ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
+        e.preventDefault();
+        SnakeGame.setDirection(state, dir);
+      }, { passive: false });
 
       restartBtn.addEventListener('click', restart);
 
