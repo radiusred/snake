@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Snake</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #1e293b;
+      --grid: #16233b;
+      --snake: #4ade80;
+      --snake-head: #86efac;
+      --food: #f87171;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    }
+    h1 { margin: 0; font-size: 1.5rem; letter-spacing: 0.02em; }
+    .scorebar {
+      display: flex;
+      gap: 24px;
+      font-size: 1.1rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .scorebar .label { color: var(--muted); }
+    .stage { position: relative; }
+    canvas {
+      background: var(--panel);
+      border-radius: 8px;
+      display: block;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    }
+    .overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      background: rgba(15, 23, 42, 0.82);
+      border-radius: 8px;
+      text-align: center;
+    }
+    .overlay[hidden] { display: none; }
+    .overlay h2 { margin: 0; font-size: 1.6rem; }
+    .overlay p { margin: 0; color: var(--muted); }
+    button {
+      font: inherit;
+      padding: 10px 20px;
+      border: 0;
+      border-radius: 6px;
+      background: var(--snake);
+      color: #06301b;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: var(--snake-head); }
+    .hint { color: var(--muted); font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>Snake</h1>
+  <div class="scorebar">
+    <div><span class="label">Score</span> <span id="score">0</span></div>
+    <div><span class="label">Best</span> <span id="best">0</span></div>
+  </div>
+  <div class="stage">
+    <canvas id="board" width="400" height="400"></canvas>
+    <div class="overlay" id="overlay" hidden>
+      <h2 id="overlay-title">Game over</h2>
+      <p id="overlay-detail">Score: 0</p>
+      <button id="restart" type="button">Restart</button>
+      <p class="hint">or press Space / Enter</p>
+    </div>
+  </div>
+  <p class="hint">Arrow keys or WASD to move</p>
+
+  <script src="game.js"></script>
+  <script>
+    (function () {
+      'use strict';
+
+      var COLS = 20;
+      var ROWS = 20;
+      var TICK_MS = 110;
+
+      var canvas = document.getElementById('board');
+      var ctx = canvas.getContext('2d');
+      var cell = canvas.width / COLS; // Square cells; canvas is COLS*cell wide.
+
+      var scoreEl = document.getElementById('score');
+      var bestEl = document.getElementById('best');
+      var overlay = document.getElementById('overlay');
+      var overlayDetail = document.getElementById('overlay-detail');
+      var restartBtn = document.getElementById('restart');
+
+      var state = SnakeGame.createState(COLS, ROWS);
+      var best = 0;
+      var timer = null;
+
+      var KEY_TO_DIR = {
+        ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
+        w: 'up', s: 'down', a: 'left', d: 'right',
+        W: 'up', S: 'down', A: 'left', D: 'right',
+      };
+
+      function draw() {
+        ctx.fillStyle = getColor('--panel');
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Subtle grid lines.
+        ctx.strokeStyle = getColor('--grid');
+        ctx.lineWidth = 1;
+        for (var i = 1; i < COLS; i++) {
+          line(i * cell, 0, i * cell, canvas.height);
+        }
+        for (var j = 1; j < ROWS; j++) {
+          line(0, j * cell, canvas.width, j * cell);
+        }
+
+        // Food.
+        drawCell(state.food.x, state.food.y, getColor('--food'));
+
+        // Snake — head brighter than the body.
+        for (var s = state.snake.length - 1; s >= 0; s--) {
+          var color = s === 0 ? getColor('--snake-head') : getColor('--snake');
+          drawCell(state.snake[s].x, state.snake[s].y, color);
+        }
+      }
+
+      function line(x1, y1, x2, y2) {
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+
+      function drawCell(x, y, color) {
+        ctx.fillStyle = color;
+        ctx.fillRect(x * cell + 1, y * cell + 1, cell - 2, cell - 2);
+      }
+
+      function getColor(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      }
+
+      function render() {
+        scoreEl.textContent = state.score;    // M1-R3: live score.
+        bestEl.textContent = best;
+        draw();
+      }
+
+      function tick() {
+        SnakeGame.step(state);
+        render();
+        if (state.over) {
+          stop();
+          showGameOver();
+        }
+      }
+
+      function showGameOver() {
+        if (state.score > best) {
+          best = state.score;
+          bestEl.textContent = best;
+        }
+        overlayDetail.textContent = 'Score: ' + state.score;
+        overlay.hidden = false; // M1-R3: game-over affordance.
+      }
+
+      function start() {
+        if (timer !== null) return;
+        timer = setInterval(tick, TICK_MS);
+      }
+
+      function stop() {
+        if (timer !== null) {
+          clearInterval(timer);
+          timer = null;
+        }
+      }
+
+      function restart() {
+        stop();
+        state = SnakeGame.createState(COLS, ROWS);
+        overlay.hidden = true;
+        render();
+        start();
+      }
+
+      document.addEventListener('keydown', function (e) {
+        if (state.over && (e.key === ' ' || e.key === 'Enter')) {
+          e.preventDefault();
+          restart();
+          return;
+        }
+        var dir = KEY_TO_DIR[e.key];
+        if (dir) {
+          e.preventDefault(); // Stop arrow keys from scrolling the page.
+          SnakeGame.setDirection(state, dir);
+        }
+      });
+
+      restartBtn.addEventListener('click', restart);
+
+      render();
+      start();
+    })();
+  </script>
+</body>
+</html>
