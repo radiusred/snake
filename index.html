@@ -90,6 +90,7 @@
   <p class="hint">Arrow keys or WASD to move</p>
 
   <script src="game.js"></script>
+  <script src="bestscore.js"></script>
   <script>
     (function () {
       'use strict';
@@ -109,7 +110,7 @@
       var restartBtn = document.getElementById('restart');
 
       var state = SnakeGame.createState(COLS, ROWS);
-      var best = 0;
+      var best = BestScore.loadBest(); // M2-R1: restore the persisted best.
       var timer = null;
 
       var KEY_TO_DIR = {
@@ -174,10 +175,10 @@
       }
 
       function showGameOver() {
-        if (state.score > best) {
-          best = state.score;
-          bestEl.textContent = best;
-        }
+        // M2-R1: persist a new best; saveBest only overwrites a lower record
+        // and returns the resulting best for the DOM.
+        best = BestScore.saveBest(state.score);
+        bestEl.textContent = best;
         overlayDetail.textContent = 'Score: ' + state.score;
         overlay.hidden = false; // M1-R3: game-over affordance.
       }

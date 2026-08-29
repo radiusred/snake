@@ -1,6 +1,6 @@
 'use strict';
 
-// Browser-integration coverage for the delivery path (M1-R1, M1-R3).
+// Browser-integration coverage for the delivery path (M1-R1, M1-R3, M2-R1).
 //
 // The unit suite in game.test.js only proves the pure logic in game.js under
 // Node. These tests exercise what the milestone actually promises a player:
@@ -22,6 +22,19 @@ const vm = require('node:vm');
 const ROOT = path.join(__dirname, '..');
 const HTML = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const GAME_SRC = fs.readFileSync(path.join(ROOT, 'game.js'), 'utf8');
+const BEST_SRC = fs.readFileSync(path.join(ROOT, 'bestscore.js'), 'utf8');
+
+// A minimal localStorage stand-in shared across "page loads" so M2-R1 reload
+// behaviour is observable. Passing the same instance into two makeHarness()
+// calls simulates closing and reopening the tab in one browser.
+function makeStorage(initial) {
+  const map = new Map(initial ? Object.entries(initial) : []);
+  return {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => { map.set(k, String(v)); },
+    removeItem: (k) => { map.delete(k); },
+  };
+}
 
 // Pull the inline controller out of index.html. There is exactly one bare
 // `<script>` block (the `<script src="game.js">` tag has an attribute and so
@@ -36,7 +49,9 @@ function inlineController(html) {
 // Elements are stable per id (the controller caches references at boot). The
 // canvas 2d context is all no-ops; getComputedStyle returns a dummy color.
 // setInterval is *captured*, not run — the test drives ticks deterministically.
-function makeHarness() {
+function makeHarness(opts) {
+  opts = opts || {};
+  const storage = opts.storage || makeStorage();
   const noop = () => {};
   // Record every fillRect so the head position stays observable. The
   // controller paints the head *last* each frame (index.html draw() walks the
@@ -98,6 +113,7 @@ function makeHarness() {
     console,
     document,
     getComputedStyle: () => ({ getPropertyValue: () => '#000000' }),
+    localStorage: storage, // M2-R1: persistence surface for bestscore.js.
     setInterval: (fn) => { captured = fn; return 1; },
     clearInterval: noop,
     // Deterministic food placement. SnakeGame.placeFood falls back to this
@@ -110,13 +126,16 @@ function makeHarness() {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
 
-  // Document order: game.js defines SnakeGame, then the controller boots.
+  // Document order: game.js defines SnakeGame, bestscore.js defines BestScore,
+  // then the controller boots.
   vm.runInContext(GAME_SRC, sandbox, { filename: 'game.js' });
+  vm.runInContext(BEST_SRC, sandbox, { filename: 'bestscore.js' });
   vm.runInContext(inlineController(HTML), sandbox, { filename: 'index.html#inline' });
 
   return {
     elements,
     document,
+    storage,
     headCell,
     tick: () => {
       assert.ok(captured, 'controller should have started a tick loop via setInterval');
@@ -230,4 +249,49 @@ test('M1-R3: a real keydown event turns the snake up (live input wiring)', () =>
   // continues right), so it pins the direction, not just "something changed".
   assert.deepStrictEqual(h.headCell(), { x: 10, y: 9 },
     'ArrowUp moves the head up exactly one row (y decreases, x unchanged)');
+});
+
+// --- M2-R1: best score persists across page reloads -------------------------
+
+test('M2-R1: a fresh load restores the persisted best and shows it before play', () => {
+  const storage = makeStorage({ 'snake.bestScore': '7' });
+  const h = makeHarness({ storage });
+  // No ticks: the boot must already reflect the stored record.
+  assert.strictEqual(h.elements.best.textContent, 7,
+    'best restored from storage at boot, before any play');
+});
+
+test('M2-R1: a new best is written to localStorage on game over', () => {
+  const h = makeHarness(); // empty store
+  // Same deterministic run as the M1-R3 wall test: exactly one food eaten
+  // (score 0 -> 1) before hitting the right wall.
+  let guard = 0;
+  while (h.elements.overlay.hidden && guard++ < 100) h.tick();
+  assert.strictEqual(h.elements.best.textContent, 1, 'DOM best updates to the run score');
+  assert.strictEqual(h.storage.getItem('snake.bestScore'), '1',
+    'the new best is persisted for the next load');
+});
+
+test('M2-R1: the best survives a reload — a second boot shows it with no play', () => {
+  const storage = makeStorage(); // one browser, shared across two loads
+  const first = makeHarness({ storage });
+  let guard = 0;
+  while (first.elements.overlay.hidden && guard++ < 100) first.tick();
+  const scored = first.elements.best.textContent;
+  assert.ok(scored >= 1, 'first run set a best');
+
+  // Simulate closing and reopening the tab: brand-new harness, SAME storage.
+  const second = makeHarness({ storage });
+  assert.strictEqual(second.elements.best.textContent, scored,
+    'the reloaded page shows the persisted best without playing');
+});
+
+test('M2-R1: a weaker run does not clobber a higher stored best', () => {
+  const storage = makeStorage({ 'snake.bestScore': '5' });
+  const h = makeHarness({ storage });
+  let guard = 0;
+  while (h.elements.overlay.hidden && guard++ < 100) h.tick(); // scores 1
+  assert.strictEqual(h.storage.getItem('snake.bestScore'), '5',
+    'the higher record is preserved');
+  assert.strictEqual(h.elements.best.textContent, 5, 'the DOM keeps the higher best');
 });
