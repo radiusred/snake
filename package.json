@@ -1,0 +1,9 @@
+{
+  "name": "snake",
+  "version": "1.0.0",
+  "description": "Playable browser-based Snake game — no build step. Open index.html directly.",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}
