@@ -176,8 +176,10 @@
 
       function showGameOver() {
         // M2-R1: persist a new best; saveBest only overwrites a lower record
-        // and returns the resulting best for the DOM.
-        best = BestScore.saveBest(state.score);
+        // and returns the resulting best for the DOM. Thread the current
+        // in-memory best so a run never lowers it when storage reads fail
+        // (private mode / blocked cookies) — see bestscore.js saveBest.
+        best = BestScore.saveBest(state.score, undefined, best);
         bestEl.textContent = best;
         overlayDetail.textContent = 'Score: ' + state.score;
         overlay.hidden = false; // M1-R3: game-over affordance.
