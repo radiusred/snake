@@ -38,11 +38,26 @@ function inlineController(html) {
 // setInterval is *captured*, not run — the test drives ticks deterministically.
 function makeHarness() {
   const noop = () => {};
+  // Record every fillRect so the head position stays observable. The
+  // controller paints the head *last* each frame (index.html draw() walks the
+  // snake tail-first), so the newest fillRect of a frame is the head cell.
+  const fills = [];
   const ctx = {
-    fillRect: noop, strokeRect: noop, clearRect: noop,
+    fillRect: (x, y) => { fills.push({ x, y }); },
+    strokeRect: noop, clearRect: noop,
     beginPath: noop, moveTo: noop, lineTo: noop, stroke: noop, fill: noop,
     fillStyle: '', strokeStyle: '', lineWidth: 1,
   };
+
+  // index.html runs a 20-wide board on a 400px canvas -> 20px cells, painting a
+  // cell at (gx*cell + 1, gy*cell + 1). Invert that inset to recover the head's
+  // grid coordinates from the last fillRect of the most recent frame.
+  const CELL = 20;
+  function headCell() {
+    const last = fills[fills.length - 1];
+    assert.ok(last, 'a frame must have been painted to read the head');
+    return { x: Math.round((last.x - 1) / CELL), y: Math.round((last.y - 1) / CELL) };
+  }
 
   function el(id) {
     const listeners = {};
@@ -85,6 +100,11 @@ function makeHarness() {
     getComputedStyle: () => ({ getPropertyValue: () => '#000000' }),
     setInterval: (fn) => { captured = fn; return 1; },
     clearInterval: noop,
+    // Deterministic food placement. SnakeGame.placeFood falls back to this
+    // Math.random when the controller steps without an rng, so a fixed 0 puts
+    // every re-placed food on the first free cell (0,0) — keeping final scores
+    // exact for the assertions below instead of at the mercy of Math.random.
+    Math: Object.assign(Object.create(Math), { random: () => 0 }),
   };
   sandbox.window = sandbox;
   sandbox.globalThis = sandbox;
@@ -97,6 +117,7 @@ function makeHarness() {
   return {
     elements,
     document,
+    headCell,
     tick: () => {
       assert.ok(captured, 'controller should have started a tick loop via setInterval');
       captured();
@@ -170,13 +191,15 @@ test('M1-R3: live DOM score increments when the snake eats', () => {
 
 test('M1-R3: hitting the wall shows the game-over overlay with the final score', () => {
   const h = makeHarness();
-  // Drive straight into the right wall. The snake head starts at x=10 on a
-  // 20-wide board; keep ticking until the controller reveals the overlay.
+  // Drive straight into the right wall. The head starts at x=10 on a 20-wide
+  // board with food 3 cells ahead at (13,10): the run eats exactly once (score
+  // 0 -> 1) before the wall, and seeded food placement (0,0) rules out a second
+  // eat, so the final score is deterministically 1. Keep ticking to game over.
   let guard = 0;
   while (h.elements.overlay.hidden && guard++ < 100) h.tick();
   assert.strictEqual(h.elements.overlay.hidden, false, 'overlay shown on game over');
-  assert.match(String(h.elements['overlay-detail'].textContent), /^Score: \d+$/,
-    'overlay reports the final score');
+  assert.strictEqual(String(h.elements['overlay-detail'].textContent), 'Score: 1',
+    'overlay reports the exact final score (one food eaten before the wall)');
 });
 
 test('M1-R3: Restart hides the overlay and resets the DOM score to 0', () => {
@@ -191,16 +214,20 @@ test('M1-R3: Restart hides the overlay and resets the DOM score to 0', () => {
   assert.strictEqual(h.elements.score.textContent, 0, 'DOM score reset to 0');
 });
 
-test('M1-R3: a real keydown event turns the snake (live input wiring)', () => {
+test('M1-R3: a real keydown event turns the snake up (live input wiring)', () => {
   const h = makeHarness();
-  // Dispatch ArrowUp through the page's document listener, then tick. The head
-  // must move up (y decreases), proving the keyboard is wired to the game.
+  // The head boots at the board centre (10,10) moving right; confirm the
+  // harness reads it before we send input.
+  assert.deepStrictEqual(h.headCell(), { x: 10, y: 10 }, 'head boots at board centre');
+
+  // Dispatch a real ArrowUp through the page's document listener, then tick.
   h.document.dispatchEvent({ type: 'keydown', key: 'ArrowUp', preventDefault() {} });
   h.tick();
-  // We can't reach the controller's private state, but movement is observable
-  // via the next food-eat geometry: after turning up, three rightward ticks no
-  // longer reach the food, so the score stays 0 where a straight run scored 1.
-  h.tick(); h.tick();
-  assert.strictEqual(h.elements.score.textContent, 0,
-    'after turning up the head no longer reaches the straight-ahead food');
+
+  // The promised assertion, now observable: the head moves *up* one row — y
+  // decreases by exactly one and x is unchanged. This fails if ArrowUp were
+  // mis-wired to down (y increases), left/right (x moves), or ignored (head
+  // continues right), so it pins the direction, not just "something changed".
+  assert.deepStrictEqual(h.headCell(), { x: 10, y: 9 },
+    'ArrowUp moves the head up exactly one row (y decreases, x unchanged)');
 });
