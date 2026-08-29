@@ -28,13 +28,20 @@
     }
   }
 
-  // Read the persisted best. Returns 0 when absent, non-numeric, negative, or
+  // Read the persisted best. Returns 0 when absent, malformed, negative, or
   // when storage is unavailable — a fresh browser starts at 0, never NaN.
+  //
+  // The stored value must be a run of digits and nothing else. parseInt() is
+  // too lax here: it accepts a numeric *prefix*, so a corrupted '42garbage'
+  // would restore 42. Validate the whole string so only what saveBest() wrote
+  // (String(positiveInteger)) is trusted; anything else collapses to 0.
   function loadBest(storage) {
     var s = resolveStorage(storage);
     if (!s) return 0;
     try {
-      var n = parseInt(s.getItem(KEY), 10);
+      var raw = s.getItem(KEY);
+      if (typeof raw !== 'string' || !/^[0-9]+$/.test(raw)) return 0;
+      var n = parseInt(raw, 10);
       return isFinite(n) && n > 0 ? n : 0;
     } catch (e) {
       return 0;
