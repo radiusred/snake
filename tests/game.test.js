@@ -94,6 +94,39 @@ test('stepping a finished game is a no-op', () => {
   assert.strictEqual(JSON.stringify(s.snake), snapshot);
 });
 
+// --- M2-R2: progressive difficulty (tickInterval curve) ---------------------
+
+test('tickInterval starts at the base interval for a fresh (score 0) game', () => {
+  const s = game.createState(20, 20);
+  assert.strictEqual(s.score, 0);
+  assert.strictEqual(game.tickInterval(0), 110, 'score 0 keeps the original feel');
+  assert.strictEqual(game.tickInterval(s.score), 110);
+});
+
+test('tickInterval shortens the loop as the score grows, then clamps to a floor', () => {
+  // Strictly decreasing while above the floor: each point shaves a fixed amount.
+  let prev = game.tickInterval(0);
+  for (let score = 1; score <= 8; score++) {
+    const cur = game.tickInterval(score);
+    assert.ok(cur < prev, `score ${score} must be faster than ${score - 1}`);
+    assert.ok(cur >= 60, 'never faster than the floor');
+    prev = cur;
+  }
+  // Floor reached at 9 and held for every higher score — the game does not run
+  // away to an unplayable speed.
+  assert.strictEqual(game.tickInterval(9), 60, 'floor reached at score 9');
+  assert.strictEqual(game.tickInterval(50), 60, 'clamped at the floor beyond');
+  assert.strictEqual(game.tickInterval(9), game.tickInterval(1000));
+});
+
+test('tickInterval floors a fractional score and guards bad input', () => {
+  assert.strictEqual(game.tickInterval(1.9), game.tickInterval(1), 'fractional score floored');
+  // Bad input degrades to the base interval rather than throwing or going NaN.
+  for (const bad of [-3, NaN, Infinity, undefined, null, 'nope']) {
+    assert.strictEqual(game.tickInterval(bad), 110, `bad input ${String(bad)} -> base`);
+  }
+});
+
 test('moving into the vacating tail cell is allowed (not self-collision)', () => {
   // A body-length move that lands where the tail currently sits must survive,
   // because the tail vacates on the same tick when not eating.

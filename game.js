@@ -40,6 +40,23 @@
     };
   }
 
+  // Progressive difficulty (M2-R2). The loop interval starts at TICK_BASE_MS
+  // and shaves TICK_STEP_MS off per point of score, clamped to TICK_MIN_MS so
+  // the game stays controllable. Score 0 equals the old fixed interval, so an
+  // untouched run feels exactly as it did before.
+  var TICK_BASE_MS = 110; // interval at score 0 (matches the former fixed tick)
+  var TICK_STEP_MS = 6; // ms shaved per point of score
+  var TICK_MIN_MS = 60; // fastest the game gets (reached at score 9)
+
+  // Pure: map a score to the tick interval in ms. Defends against bad input
+  // (non-number / negative / non-finite → treated as 0) and floors the score,
+  // so the browser can call it with live state without extra guarding.
+  function tickInterval(score) {
+    if (typeof score !== 'number' || !isFinite(score) || score < 0) score = 0;
+    var ms = TICK_BASE_MS - Math.floor(score) * TICK_STEP_MS;
+    return ms < TICK_MIN_MS ? TICK_MIN_MS : ms;
+  }
+
   // Resolve a direction name to a vector, or null if unknown.
   function directionFor(name) {
     return DIRECTIONS[name] || null;
@@ -130,6 +147,7 @@
   var api = {
     DIRECTIONS: DIRECTIONS,
     createState: createState,
+    tickInterval: tickInterval,
     directionFor: directionFor,
     setDirection: setDirection,
     placeFood: placeFood,
