@@ -23,9 +23,12 @@ Then either open `index.html` directly in a browser (`file://`), or serve
 the folder with any trivial static server, e.g.:
 
 ```bash
-npx http-server .
-# or: python3 -m http.server
+python3 -m http.server
 ```
+
+(`npx http-server .` also works, but the first run downloads and installs
+the `http-server` package and asks for interactive confirmation — not a
+"no install" option.)
 
 ## Play
 
