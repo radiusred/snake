@@ -19,6 +19,8 @@ const http = require('node:http');
 const path = require('node:path');
 const vm = require('node:vm');
 
+const game = require('../game.js'); // shared source of the M2-R2 interval curve
+
 const ROOT = path.join(__dirname, '..');
 const HTML = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const GAME_SRC = fs.readFileSync(path.join(ROOT, 'game.js'), 'utf8');
@@ -108,13 +110,14 @@ function makeHarness(opts) {
   };
 
   let captured = null; // the setInterval tick callback
+  let capturedMs = null; // and the delay it was scheduled at (M2-R2 reschedules it)
   const sandbox = {
     module: { exports: {} },
     console,
     document,
     getComputedStyle: () => ({ getPropertyValue: () => '#000000' }),
     localStorage: storage, // M2-R1: persistence surface for bestscore.js.
-    setInterval: (fn) => { captured = fn; return 1; },
+    setInterval: (fn, ms) => { captured = fn; capturedMs = ms; return 1; },
     clearInterval: noop,
     // Deterministic food placement. SnakeGame.placeFood falls back to this
     // Math.random when the controller steps without an rng, so a fixed 0 puts
@@ -137,6 +140,9 @@ function makeHarness(opts) {
     document,
     storage,
     headCell,
+    // The delay the loop is currently scheduled at. M2-R2 reschedules the
+    // interval as the score rises, so this shrinks over a run.
+    intervalMs: () => capturedMs,
     tick: () => {
       assert.ok(captured, 'controller should have started a tick loop via setInterval');
       captured();
@@ -294,6 +300,48 @@ test('M2-R1: a weaker run does not clobber a higher stored best', () => {
   assert.strictEqual(h.storage.getItem('snake.bestScore'), '5',
     'the higher record is preserved');
   assert.strictEqual(h.elements.best.textContent, 5, 'the DOM keeps the higher best');
+});
+
+// --- M2-R2: progressive difficulty (the loop speeds up with the score) ------
+
+test('M2-R2: the loop boots at the base interval and speeds up after eating', () => {
+  const h = makeHarness();
+  // At boot the controller schedules the loop at the score-0 (base) interval.
+  assert.strictEqual(h.intervalMs(), game.tickInterval(0), 'boots at the base interval');
+  assert.strictEqual(h.elements.score.textContent, 0);
+
+  // Fresh state: head (10,10) moving right, food 3 cells ahead at (13,10).
+  // Three ticks reach and eat it; the score goes 0 -> 1 and the loop must be
+  // rescheduled to the shorter score-1 interval.
+  h.tick(); h.tick(); h.tick();
+  assert.strictEqual(h.elements.score.textContent, 1, 'ate one food');
+  assert.strictEqual(h.intervalMs(), game.tickInterval(1),
+    'loop rescheduled to the score-1 interval after eating');
+  assert.ok(h.intervalMs() < game.tickInterval(0),
+    'the game got faster, not slower');
+});
+
+test('M2-R2: the interval never drops below the floor across a whole run', () => {
+  const h = makeHarness();
+  const floor = game.tickInterval(1000); // clamped floor
+  let guard = 0;
+  while (h.elements.overlay.hidden && guard++ < 500) {
+    h.tick();
+    assert.ok(h.intervalMs() >= floor,
+      'the loop is never scheduled faster than the floor');
+  }
+  assert.strictEqual(h.elements.overlay.hidden, false, 'run reached game over');
+});
+
+test('M2-R2: restarting resets the loop back to the base speed', () => {
+  const h = makeHarness();
+  h.tick(); h.tick(); h.tick(); // eat one -> faster than base
+  assert.ok(h.intervalMs() < game.tickInterval(0), 'sped up during the run');
+
+  h.elements.restart.dispatch('click');
+  assert.strictEqual(h.elements.score.textContent, 0, 'score reset');
+  assert.strictEqual(h.intervalMs(), game.tickInterval(0),
+    'a fresh run starts back at the base speed');
 });
 
 test('M2-R1: a weaker run keeps the displayed best when storage goes unusable mid-session (regression)', () => {

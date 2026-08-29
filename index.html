@@ -97,7 +97,6 @@
 
       var COLS = 20;
       var ROWS = 20;
-      var TICK_MS = 110;
 
       var canvas = document.getElementById('board');
       var ctx = canvas.getContext('2d');
@@ -112,6 +111,7 @@
       var state = SnakeGame.createState(COLS, ROWS);
       var best = BestScore.loadBest(); // M2-R1: restore the persisted best.
       var timer = null;
+      var tickMs = null; // current loop interval; tracks SnakeGame.tickInterval(score).
 
       var KEY_TO_DIR = {
         ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
@@ -171,6 +171,15 @@
         if (state.over) {
           stop();
           showGameOver();
+          return;
+        }
+        // M2-R2: eating raises the score, which shortens the interval. Reschedule
+        // the loop whenever the score-driven interval changes (i.e. after a bite).
+        var want = SnakeGame.tickInterval(state.score);
+        if (want !== tickMs) {
+          stop();
+          tickMs = want;
+          timer = setInterval(tick, tickMs);
         }
       }
 
@@ -187,7 +196,9 @@
 
       function start() {
         if (timer !== null) return;
-        timer = setInterval(tick, TICK_MS);
+        // M2-R2: seed the interval from the current score (base speed at 0).
+        tickMs = SnakeGame.tickInterval(state.score);
+        timer = setInterval(tick, tickMs);
       }
 
       function stop() {
