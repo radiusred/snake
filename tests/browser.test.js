@@ -367,3 +367,81 @@ test('M2-R1: a weaker run keeps the displayed best when storage goes unusable mi
   assert.strictEqual(h.elements.best.textContent, 6,
     'the weaker run keeps the higher in-session best, not a re-read 0');
 });
+
+// --- M2-R3: touch/swipe controls play alongside the keyboard ----------------
+
+// Fire a swipe at the board: a touchstart at (x0,y0) then a touchend offset by
+// (dx,dy). Mirrors what a finger dragging across the canvas dispatches; the
+// controller reads clientX/clientY off changedTouches. A zero offset (dx=dy=0)
+// is a tap. preventDefault is a no-op the handlers are free to call.
+function swipe(h, dx, dy) {
+  const x0 = 200, y0 = 200; // arbitrary start; only the delta drives direction
+  const ev = (x, y) => ({ changedTouches: [{ clientX: x, clientY: y }], preventDefault() {} });
+  h.elements.board.dispatch('touchstart', ev(x0, y0));
+  h.elements.board.dispatch('touchend', ev(x0 + dx, y0 + dy));
+}
+
+test('M2-R3: the controller wires touch listeners onto the board canvas', () => {
+  const h = makeHarness();
+  const bound = h.elements.board._listeners;
+  assert.ok(bound.touchstart && bound.touchstart.length, 'touchstart is wired on the canvas');
+  assert.ok(bound.touchend && bound.touchend.length, 'touchend is wired on the canvas');
+});
+
+test('M2-R3: an upward swipe turns the head up (live touch input wiring)', () => {
+  const h = makeHarness();
+  // Head boots at the board centre (10,10) moving right — same start the
+  // ArrowUp keydown test relies on.
+  assert.deepStrictEqual(h.headCell(), { x: 10, y: 10 }, 'head boots at board centre');
+
+  swipe(h, 0, -60); // drag up: negative dy, dominant vertical axis
+  h.tick();
+
+  assert.deepStrictEqual(h.headCell(), { x: 10, y: 9 },
+    'an up swipe moves the head up exactly one row (y decreases, x unchanged)');
+});
+
+test('M2-R3: a horizontal swipe steers after a turn (both axes map correctly)', () => {
+  const h = makeHarness();
+  // Turn up first (right -> left would be a rejected reversal), then swipe left,
+  // which is now a legal 90-degree turn.
+  swipe(h, 0, -60); // up
+  h.tick();
+  assert.deepStrictEqual(h.headCell(), { x: 10, y: 9 }, 'now heading up');
+
+  swipe(h, -60, 0); // left: negative dx, dominant horizontal axis
+  h.tick();
+  assert.deepStrictEqual(h.headCell(), { x: 9, y: 9 },
+    'a left swipe moves the head left exactly one column (x decreases)');
+});
+
+test('M2-R3: a sub-threshold drag is ignored as a tap, not a swipe', () => {
+  const h = makeHarness();
+  swipe(h, 6, -8); // both deltas below SWIPE_MIN_PX: a tap
+  h.tick();
+  assert.deepStrictEqual(h.headCell(), { x: 11, y: 10 },
+    'the head keeps heading right — a tap does not steer');
+});
+
+test('M2-R3: a reversal swipe is rejected (no 180-degree turn into the neck)', () => {
+  const h = makeHarness();
+  // Heading right; a hard left swipe is a direct reversal and must be ignored.
+  swipe(h, -80, 0); // left
+  h.tick();
+  assert.deepStrictEqual(h.headCell(), { x: 11, y: 10 },
+    'a reversal swipe leaves the snake heading right');
+});
+
+test('M2-R3: touch and keyboard drive the same game in one session', () => {
+  const h = makeHarness();
+  // A keydown then a swipe, both effective — proving touch is added *alongside*
+  // the keyboard, not replacing it.
+  h.document.dispatchEvent({ type: 'keydown', key: 'ArrowUp', preventDefault() {} });
+  h.tick();
+  assert.deepStrictEqual(h.headCell(), { x: 10, y: 9 }, 'keyboard turned the head up');
+
+  swipe(h, 60, 0); // right: now a legal turn from heading up
+  h.tick();
+  assert.deepStrictEqual(h.headCell(), { x: 11, y: 9 },
+    'a swipe then steers the same snake right');
+});
