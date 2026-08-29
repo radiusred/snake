@@ -41,13 +41,23 @@
     }
   }
 
-  // Persist `score` as the new best only when it beats the stored value, so a
+  // Persist `score` as the new best only when it beats the current best, so a
   // weaker run never clobbers a record. Returns the resulting best (updated or
   // unchanged). Never throws: a failed/absent write still returns the higher
   // value for in-session display.
-  function saveBest(score, storage) {
+  //
+  // `priorBest` is the caller's in-memory best (the controller threads its
+  // displayed value here). It matters when storage is present but unusable:
+  // loadBest() then collapses to 0, and without a floor a weaker run after a
+  // strong one would *lower* the displayed best (6 -> 2) and could even
+  // overwrite a good stored value with the smaller number. Flooring `current`
+  // at the prior in-session best retains it across calls when reads fail.
+  function saveBest(score, storage, priorBest) {
     var s = resolveStorage(storage);
     var current = loadBest(s);
+    if (typeof priorBest === 'number' && isFinite(priorBest) && priorBest > current) {
+      current = priorBest;
+    }
     if (!(score > current)) return current;
     if (s) {
       try {

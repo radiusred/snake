@@ -295,3 +295,27 @@ test('M2-R1: a weaker run does not clobber a higher stored best', () => {
     'the higher record is preserved');
   assert.strictEqual(h.elements.best.textContent, 5, 'the DOM keeps the higher best');
 });
+
+test('M2-R1: a weaker run keeps the displayed best when storage goes unusable mid-session (regression)', () => {
+  // Storage reads once at boot (restoring 6) then starts throwing — a tab whose
+  // storage access flips to blocked mid-session. A subsequent run scores the
+  // deterministic 1; the controller must thread its in-memory best (6) so the
+  // DOM never drops 6 -> 1. Without the fix, saveBest re-reads storage, gets 0,
+  // and 1 > 0 downgrades the displayed best.
+  let reads = 0;
+  const flaky = {
+    getItem: (k) => {
+      if (reads++ === 0) return k === 'snake.bestScore' ? '6' : null; // boot restore
+      throw new Error('storage went away');
+    },
+    setItem: () => { throw new Error('storage went away'); },
+    removeItem: () => {},
+  };
+  const h = makeHarness({ storage: flaky });
+  assert.strictEqual(h.elements.best.textContent, 6, 'boot restores the stored best');
+
+  let guard = 0;
+  while (h.elements.overlay.hidden && guard++ < 100) h.tick(); // deterministic score 1
+  assert.strictEqual(h.elements.best.textContent, 6,
+    'the weaker run keeps the higher in-session best, not a re-read 0');
+});

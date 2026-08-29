@@ -62,6 +62,27 @@ test('saveBest tolerates a throwing store: returns the higher value, no throw', 
   assert.strictEqual(best.saveBest(6, throwingStorage), 6);
 });
 
+test('saveBest retains a higher in-session best when storage reads fail (regression)', () => {
+  // Storage is present but unusable (private mode / blocked cookies), so every
+  // loadBest() collapses to 0. A strong run (6) then a weaker one (2): the
+  // controller threads its in-memory best back in as priorBest, so the weaker
+  // run must NOT drop the displayed best from 6 to 2.
+  const high = best.saveBest(6, throwingStorage);
+  assert.strictEqual(high, 6, 'the strong run establishes 6 for the session');
+  assert.strictEqual(best.saveBest(2, throwingStorage, high), 6,
+    'a weaker later run keeps the higher in-session best, not a re-read 0');
+  assert.strictEqual(best.saveBest(9, throwingStorage, high), 9,
+    'a genuine new high still wins over the prior best');
+});
+
+test('saveBest keeps the in-session best when storage is entirely unavailable', () => {
+  // resolveStorage(null) yields no store at all (localStorage absent). The
+  // in-session best must still be preserved across calls via priorBest.
+  const high = best.saveBest(8, null);
+  assert.strictEqual(high, 8);
+  assert.strictEqual(best.saveBest(3, null, high), 8, 'a weaker run does not regress');
+});
+
 test('KEY is a stable, namespaced string', () => {
   assert.strictEqual(best.KEY, 'snake.bestScore');
 });
