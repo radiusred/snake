@@ -1,0 +1,31 @@
+name: commitlint
+
+on:
+  pull_request:
+
+jobs:
+  commitlint:
+    name: Lint commit messages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check conventional-commit format on PR commits
+        run: |
+          set -euo pipefail
+          base='${{ github.event.pull_request.base.sha }}'
+          head='${{ github.event.pull_request.head.sha }}'
+          fail=0
+          while read -r sha; do
+            subject=$(git log -1 --format=%s "$sha")
+            if ! grep -qE '^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9./-]+\))?!?: .+' <<<"$subject"; then
+              echo "::error::$sha subject is not conventional-commit format: $subject"
+              fail=1
+            fi
+            if [ "${#subject}" -gt 100 ]; then
+              echo "::error::$sha subject exceeds 100 characters"
+              fail=1
+            fi
+          done < <(git rev-list "$base..$head")
+          exit "$fail"

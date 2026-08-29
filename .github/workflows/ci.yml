@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Syntax check
+        run: node --check game.js
+      # `node --test` exits 0 when no test files exist yet and picks up
+      # tests/*.test.js automatically. Snake's M1 suite lives in tests/.
+      - name: Unit tests
+        run: node --test
